@@ -7,14 +7,20 @@ require (
 	github.com/edwarnicke/debug v1.0.0
 	github.com/edwarnicke/grpcfd v1.1.2
 	github.com/edwarnicke/vpphelper v0.2.0
+	github.com/golang/protobuf v1.5.3
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/networkservicemesh/api v1.9.1-0.20230627143611-9785eacf9687
+	github.com/networkservicemesh/api v1.10.1-0.20230822145124-c4a3ece88804
+	github.com/networkservicemesh/govpp v0.0.0-20230630105900-092690d52a97
 	github.com/networkservicemesh/sdk v0.5.1-0.20230720103431-8dc141944a44
 	github.com/networkservicemesh/sdk-vpp v0.0.0-20230720104235-e1184e20bfcf
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spiffe/go-spiffe/v2 v2.0.0
 	google.golang.org/grpc v1.55.0
 )
+
+replace github.com/networkservicemesh/govpp => ./local/govpp
+
+replace github.com/networkservicemesh/sdk => ./local/sdk
 
 require (
 	git.fd.io/govpp.git v0.3.6-0.20210927044411-385ccc0d8ba9 // indirect
@@ -28,18 +34,17 @@ require (
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.2.0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.11.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/lunixbochs/struc v0.0.0-20200521075829-a4cb8d33dbbe // indirect
-	github.com/networkservicemesh/govpp v0.0.0-20230630105900-092690d52a97 // indirect
 	github.com/networkservicemesh/sdk-kernel v0.0.0-20230720103750-61d67ebc52f8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74 // indirect
 	github.com/zeebo/errs v1.2.2 // indirect
+	go.fd.io/govpp v0.8.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.42.0 // indirect
 	go.opentelemetry.io/otel v1.16.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.16.0 // indirect

@@ -33,7 +33,9 @@ import (
 	"github.com/edwarnicke/debug"
 	"github.com/edwarnicke/grpcfd"
 	"github.com/edwarnicke/vpphelper"
+	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/kelseyhightower/envconfig"
+	"github.com/networkservicemesh/sdk/pkg/networkservice/core/next"
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -41,9 +43,14 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/networkservicemesh/api/pkg/api/networkservice"
+	"github.com/networkservicemesh/govpp/binapi/interface_types"
+	"github.com/networkservicemesh/govpp/binapi/ip_types"
+	"github.com/networkservicemesh/govpp/binapi/ping"
 	"github.com/networkservicemesh/sdk-vpp/pkg/networkservice/connectioncontext"
 	"github.com/networkservicemesh/sdk-vpp/pkg/networkservice/mechanisms/memif"
 	"github.com/networkservicemesh/sdk-vpp/pkg/networkservice/up"
+	"github.com/networkservicemesh/sdk-vpp/pkg/tools/ifindex"
+
 	"github.com/networkservicemesh/sdk/pkg/networkservice/chains/client"
 	"github.com/networkservicemesh/sdk/pkg/networkservice/common/clientinfo"
 	"github.com/networkservicemesh/sdk/pkg/networkservice/common/excludedprefixes"
@@ -67,13 +74,37 @@ import (
 type Config struct {
 	Name                  string                  `default:"cmd-nsc-vpp" desc:"Name of Endpoint"`
 	DialTimeout           time.Duration           `default:"5s" desc:"timeout to dial NSMgr" split_words:"true"`
-	RequestTimeout        time.Duration           `default:"15s" desc:"timeout to request NSE" split_words:"true"`
+	RequestTimeout        time.Duration           `default:"35s" desc:"timeout to request NSE" split_words:"true"`
 	ConnectTo             url.URL                 `default:"unix:///var/lib/networkservicemesh/nsm.io.sock" desc:"url to connect to" split_words:"true"`
 	MaxTokenLifetime      time.Duration           `default:"10m" desc:"maximum lifetime of tokens" split_words:"true"`
 	NetworkServices       []url.URL               `default:"" desc:"A list of Network Service Requests" split_words:"true"`
 	AwarenessGroups       awarenessgroups.Decoder `defailt:"" desc:"Awareness groups for mutually aware NSEs" split_words:"true"`
 	LogLevel              string                  `default:"INFO" desc:"Log level" split_words:"true"`
 	OpenTelemetryEndpoint string                  `default:"otel-collector.observability.svc.cluster.local:4317" desc:"OpenTelemetry Collector Endpoint"`
+}
+
+type ifIndexGetClient struct {
+	ifindex *interface_types.InterfaceIndex
+}
+
+func NewClient(ctx context.Context, ifindex *interface_types.InterfaceIndex) networkservice.NetworkServiceClient {
+	return &ifIndexGetClient{
+		ifindex: ifindex,
+	}
+}
+
+func (u *ifIndexGetClient) Request(ctx context.Context, request *networkservice.NetworkServiceRequest, opts ...grpc.CallOption) (*networkservice.Connection, error) {
+	conn, err := next.Client(ctx).Request(ctx, request, opts...)
+
+	ifindex, _ := ifindex.Load(ctx, true)
+	*u.ifindex = ifindex
+	log.FromContext(ctx).Infof("ifindex: %v", ifindex)
+
+	return conn, err
+}
+
+func (u *ifIndexGetClient) Close(ctx context.Context, conn *networkservice.Connection, opts ...grpc.CallOption) (*empty.Empty, error) {
+	return next.Client(ctx).Close(ctx, conn, opts...)
 }
 
 func main() {
@@ -183,31 +214,77 @@ func main() {
 	// ********************************************************************************
 	dialOptions := append(tracing.WithTracingDial(),
 		grpc.WithDefaultCallOptions(
-			grpc.WaitForReady(true),
 			grpc.PerRPCCredentials(token.NewPerRPCCredentials(spiffejwt.TokenGeneratorFunc(source, config.MaxTokenLifetime))),
 		),
 		grpc.WithTransportCredentials(
 			grpcfd.TransportCredentials(
-				credentials.NewTLS(
-					tlsClientConfig,
-				),
-			),
-		),
+				credentials.NewTLS(tlsClientConfig))),
 		grpcfd.WithChainStreamInterceptor(),
 		grpcfd.WithChainUnaryInterceptor(),
 	)
+
+	var ifindex interface_types.InterfaceIndex
 
 	nsmClient := client.NewClient(
 		ctx,
 		client.WithClientURL(&config.ConnectTo),
 		client.WithName(config.Name),
-		client.WithHealClient(heal.NewClient(ctx)),
+		client.WithHealClient(heal.NewClient(ctx,
+			heal.WithLivenessCheck(func(deadlineCtx context.Context, conn *networkservice.Connection) bool {
+				l := log.FromContext(ctx)
+
+				defer l.Info("Finish pinging")
+				defaultTimeout := time.Second
+				deadline, ok := deadlineCtx.Deadline()
+				if !ok {
+					deadline = time.Now().Add(defaultTimeout)
+				}
+				timeout := time.Until(deadline)
+
+				packetCount := 4
+				interval := timeout.Seconds() / float64(packetCount) * 0.7
+				//srcIP := resp.Context.IpContext.SrcIpAddrs[0]
+				dstIP := conn.Context.IpContext.DstIpAddrs[0]
+
+				var msg ping.MyPingPing
+
+				//srcAddress, _ := ip_types.ParseAddress(srcIP[:len(srcIP)-3])
+				dstAddress, _ := ip_types.ParseAddress(dstIP[:len(dstIP)-3])
+
+				msg.Address = dstAddress
+				msg.SwIfIndex = 1
+				msg.Interval = interval
+				msg.Repeat = uint32(packetCount)
+
+				reply, err := ping.NewServiceClient(vppConn).MyPingPing(deadlineCtx, &msg)
+				if err != nil && deadlineCtx.Err() != nil {
+					l.Infof("deadline exceeded: %s", err.Error())
+					return true
+				}
+
+				if err != nil {
+					l.Infof("error while creating ping: %s", err.Error())
+					return false
+				}
+
+				l.Infof("reply.Retval: %v", reply.Retval)
+				l.Infof("reply.RequestCount: %v", reply.RequestCount)
+				l.Infof("reply.ReplyCount: %v", reply.ReplyCount)
+				l.Infof("reply.IfIndex: %v", reply.IfIndex)
+				l.Infof("reply.EventType1: %v", reply.EventType1)
+				l.Infof("reply.PingRes1: %v", reply.PingRes1)
+
+				return reply.ReplyCount > 0
+			}),
+			heal.WithLivenessCheckInterval(time.Second*3),
+			heal.WithLivenessCheckTimeout(time.Second*10))),
 		client.WithAdditionalFunctionality(
 			clientinfo.NewClient(),
 			upstreamrefresh.NewClient(ctx),
 			up.NewClient(ctx, vppConn),
 			connectioncontext.NewClient(vppConn),
 			memif.NewClient(ctx, vppConn),
+			NewClient(ctx, &ifindex),
 			sendfd.NewClient(),
 			recvfd.NewClient(),
 			excludedprefixes.NewClient(excludedprefixes.WithAwarenessGroups(config.AwarenessGroups)),
