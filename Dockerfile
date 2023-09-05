@@ -1,5 +1,5 @@
 ARG VPP_VERSION=v23.02-rc0-189-gb53439efb
-FROM nikitaxored/govpp:1 as go
+FROM nikitaxored/govpp:fast as go
 COPY --from=golang:1.20.5-buster /usr/local/go/ /go
 ENV PATH ${PATH}:/go/bin
 ENV GO111MODULE=on
@@ -25,6 +25,6 @@ CMD go test -test.v ./...
 FROM test as debug
 CMD dlv -l :40000 --headless=true --api-version=2 test -test.v ./...
 
-FROM nikitaxored/govpp:1 as runtime
+FROM nikitaxored/govpp:fast as runtime
 COPY --from=build /bin/cmd-nsc-vpp /bin/cmd-nsc-vpp
 ENTRYPOINT [ "/bin/cmd-nsc-vpp" ]

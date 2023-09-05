@@ -243,38 +243,46 @@ func main() {
 
 				packetCount := 4
 				interval := timeout.Seconds() / float64(packetCount) * 0.7
-				//srcIP := resp.Context.IpContext.SrcIpAddrs[0]
 				dstIP := conn.Context.IpContext.DstIpAddrs[0]
 
 				var msg ping.MyPingPing
 
-				//srcAddress, _ := ip_types.ParseAddress(srcIP[:len(srcIP)-3])
 				dstAddress, _ := ip_types.ParseAddress(dstIP[:len(dstIP)-3])
 
 				msg.Address = dstAddress
 				msg.SwIfIndex = 1
 				msg.Interval = interval
-				msg.Repeat = uint32(packetCount)
 
-				reply, err := ping.NewServiceClient(vppConn).MyPingPing(deadlineCtx, &msg)
-				if err != nil && deadlineCtx.Err() != nil {
-					l.Infof("deadline exceeded: %s", err.Error())
-					return true
+				replyCount := 0
+
+				for i := 0; i < packetCount; i++ {
+					reply, _ := ping.NewServiceClient(vppConn).MyPingPing(deadlineCtx, &msg)
+					if deadlineCtx.Err() != nil {
+						l.Info("deadline exceeded")
+
+						if reply != nil {
+							replyCount += int(reply.ReplyCount)
+
+							l.Infof("reply.Retval: %v", reply.Retval)
+							l.Infof("reply.RequestCount: %v", reply.RequestCount)
+							l.Infof("reply.ReplyCount: %v", reply.ReplyCount)
+							l.Infof("reply.IfIndex: %v", reply.IfIndex)
+						}
+
+						return replyCount > 0
+					}
+
+					if reply != nil {
+						l.Infof("reply.Retval: %v", reply.Retval)
+						l.Infof("reply.RequestCount: %v", reply.RequestCount)
+						l.Infof("reply.ReplyCount: %v", reply.ReplyCount)
+						l.Infof("reply.IfIndex: %v", reply.IfIndex)
+					}
+
+					replyCount += int(reply.ReplyCount)
 				}
 
-				if err != nil {
-					l.Infof("error while creating ping: %s", err.Error())
-					return false
-				}
-
-				l.Infof("reply.Retval: %v", reply.Retval)
-				l.Infof("reply.RequestCount: %v", reply.RequestCount)
-				l.Infof("reply.ReplyCount: %v", reply.ReplyCount)
-				l.Infof("reply.IfIndex: %v", reply.IfIndex)
-				l.Infof("reply.EventType1: %v", reply.EventType1)
-				l.Infof("reply.PingRes1: %v", reply.PingRes1)
-
-				return reply.ReplyCount > 0
+				return replyCount > 0
 			}),
 			heal.WithLivenessCheckInterval(time.Second*3),
 			heal.WithLivenessCheckTimeout(time.Second*10))),
